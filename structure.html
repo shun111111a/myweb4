@@ -1,0 +1,2083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>杂化轨道与分子结构可视化</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070910;
+      --panel: rgba(13, 19, 31, .88);
+      --panel-strong: rgba(17, 27, 43, .96);
+      --line: rgba(139, 196, 255, .26);
+      --text: #f6fbff;
+      --muted: #9fb2c3;
+      --blue: #74c7ff;
+      --orange: #ffad5c;
+      --green: #45e0a6;
+      --purple: #b68cff;
+      --yellow: #ffd76a;
+      --danger: #ff6b7a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #070910 0%, #101726 58%, #070910 100%);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", Arial, sans-serif;
+      overflow-x: hidden;
+    }
+
+    button,
+    input,
+    select { font: inherit; }
+
+    button {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .07);
+      color: var(--text);
+      border-radius: 8px;
+      min-height: 42px;
+      padding: 0 14px;
+      cursor: pointer;
+    }
+
+    button[aria-pressed="true"],
+    button.primary {
+      border-color: rgba(255, 215, 106, .7);
+      background: rgba(255, 215, 106, .18);
+    }
+
+    .app {
+      width: min(1600px, 100%);
+      margin: 0 auto;
+      padding: 20px clamp(12px, 2.5vw, 30px) 26px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 40px);
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .mode-tabs,
+    .remote,
+    .advanced-grid,
+    .library-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .control-panel {
+      margin: 16px 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .remote { justify-content: space-between; }
+
+    .remote-main {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .advanced {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .advanced.open { display: block; }
+
+    .advanced label {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+    }
+
+    .triptych {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      min-height: 560px;
+    }
+
+    .pane,
+    .explorer-stage {
+      position: relative;
+      overflow: hidden;
+      min-height: 560px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: radial-gradient(circle at 50% 30%, rgba(116, 199, 255, .12), transparent 42%), var(--panel-strong);
+    }
+
+    .pane header,
+    .explorer-stage header {
+      position: absolute;
+      z-index: 2;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .pane h2,
+    .explorer-stage h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .canvas-host {
+      position: absolute;
+      inset: 0;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .canvas-host canvas {
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .canvas-host.is-dragging,
+    .canvas-host.is-dragging canvas {
+      cursor: grabbing;
+    }
+
+    .explorer {
+      display: none;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 12px;
+    }
+
+    .explorer.active { display: grid; }
+
+    .triptych.hidden { display: none; }
+
+    .library {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+      max-height: 640px;
+      overflow: auto;
+    }
+
+    .library h3 {
+      margin: 12px 0 8px;
+      font-size: 16px;
+    }
+
+    .library button {
+      display: flex;
+      width: 100%;
+      justify-content: flex-start;
+      margin-bottom: 8px;
+      text-align: left;
+    }
+
+    .library button.active {
+      border-color: rgba(69, 224, 166, .72);
+      background: rgba(69, 224, 166, .16);
+    }
+
+    .status {
+      margin-top: 10px;
+      color: var(--muted);
+      min-height: 22px;
+      font-size: 14px;
+    }
+
+    @media (max-width: 1100px) {
+      .triptych,
+      .explorer.active { grid-template-columns: 1fr; }
+
+      .pane,
+      .explorer-stage { min-height: 420px; }
+
+      .topbar { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="topbar" aria-label="应用标题">
+      <div>
+        <h1>杂化轨道与分子结构可视化</h1>
+        <p class="subtitle">同步展示轨道结构与含轨道叠加的球棍模型，也可进入模型库自由观察。</p>
+      </div>
+      <div class="mode-tabs" role="group" aria-label="模式切换">
+        <button id="triptychMode" class="primary" aria-pressed="true">同步对照</button>
+        <button id="explorerMode" aria-pressed="false">自由探索</button>
+      </div>
+    </section>
+
+    <section class="control-panel" aria-label="控制区">
+      <div class="remote">
+        <div class="remote-main" role="group" aria-label="课堂遥控">
+          <button id="playBtn" aria-pressed="false">播放</button>
+          <button id="pauseBtn" class="primary" aria-pressed="true">暂停</button>
+          <button id="prevBtn">上一步</button>
+          <button id="nextBtn">下一步</button>
+          <button id="resetBtn">重置</button>
+          <button id="autoRotateBtn" aria-pressed="false">自动旋转</button>
+          <select id="topicSelect" aria-label="切换主题"></select>
+        </div>
+        <button id="advancedBtn" aria-expanded="false" aria-controls="advancedPanel">高级控制</button>
+      </div>
+      <div id="advancedPanel" class="advanced" aria-label="高级控制区">
+        <div class="advanced-grid">
+          <label><input id="labelsToggle" type="checkbox" checked> 标签</label>
+          <label><input id="anglesToggle" type="checkbox" checked> 键角</label>
+          <label><input id="orbitalsToggle" type="checkbox" checked> 轨道</label>
+          <label><input id="ballStickToggle" type="checkbox" checked> 球棍</label>
+          <label><input id="overlapToggle" type="checkbox" checked> 重叠区域</label>
+          <label><input id="syncRotateToggle" type="checkbox" checked> 同步旋转</label>
+          <label>透明度 <input id="opacityRange" type="range" min="0.15" max="0.9" step="0.05" value="0.55"></label>
+          <label>速度 <input id="speedRange" type="range" min="0.5" max="2" step="0.25" value="1"></label>
+        </div>
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </section>
+
+    <section id="triptych" class="triptych" aria-label="同步对照展示">
+      <article class="pane">
+        <header>
+          <h2>轨道结构</h2>
+          <span id="orbitalCaption"></span>
+        </header>
+        <div id="orbitalPane" class="canvas-host"></div>
+      </article>
+      <article class="pane">
+        <header>
+          <h2>球棍与成键轨道对照</h2>
+          <span id="moleculeCaption"></span>
+        </header>
+        <div id="moleculePane" class="canvas-host"></div>
+      </article>
+    </section>
+
+    <section id="explorer" class="explorer" aria-label="自由探索模型库">
+      <aside id="library" class="library" aria-label="模型库"></aside>
+      <article class="explorer-stage">
+        <header>
+          <h2 id="explorerTitle">模型观察</h2>
+          <span id="explorerCaption"></span>
+        </header>
+        <div id="explorerPane" class="canvas-host"></div>
+      </article>
+    </section>
+  </main>
+
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
+
+    const app = {
+      mode: "triptych",
+      topicId: "orbital-structure",
+      stepIndex: 0,
+      isPlaying: false,
+      speed: 1,
+      settings: {
+        labels: true,
+        angles: true,
+        orbitals: true,
+        ballStick: true,
+        overlap: true,
+        autoRotate: false,
+        syncRotate: true,
+        opacity: 0.55
+      },
+      panes: {},
+      renderLoopStarted: false,
+      animationFrameId: null,
+      controlsInitialized: false,
+      playbackLoopStarted: false,
+      playbackFrameId: null,
+      lastPlaybackAt: 0,
+      explorerSelection: { type: "molecule", id: "CH4" }
+    };
+
+    const ELEMENTS = {
+      H: { name: "氢", color: "#f7fbff", radius: 0.31 },
+      C: { name: "碳", color: "#3f4652", radius: 0.76 },
+      N: { name: "氮", color: "#4e7cff", radius: 0.71 },
+      O: { name: "氧", color: "#ff5c67", radius: 0.66 },
+      B: { name: "硼", color: "#ffb06b", radius: 0.85 },
+      F: { name: "氟", color: "#7ee787", radius: 0.57 }
+    };
+
+    const THEMES = [
+      {
+        id: "orbital-structure",
+        name: "轨道结构",
+        label: "轨道结构",
+        orbitalModel: "sp3",
+        bondModel: "sigma",
+        molecule: "CH4",
+        steps: ["s / p 轨道方向", "sp 杂化", "sp² 杂化", "sp³ 杂化", "球棍对照"],
+        color: "#74c7ff"
+      },
+      {
+        id: "single-bond",
+        name: "单键 σ 键",
+        label: "单键",
+        orbitalModel: "sp3",
+        bondModel: "sigma",
+        molecule: "CH4",
+        steps: ["轨道对准", "头碰头靠近", "重叠区域高亮", "σ 键形成", "球棍模型定型"],
+        color: "#45e0a6"
+      },
+      {
+        id: "double-bond",
+        name: "双键 σ + π",
+        label: "双键",
+        orbitalModel: "sp2",
+        bondModel: "sigmaPi",
+        molecule: "C2H4",
+        steps: ["sp² 平面骨架", "σ 键形成", "保留未杂化 p 轨道", "π 键侧向重叠", "乙烯球棍模型定型"],
+        color: "#ffad5c"
+      },
+      {
+        id: "triple-bond",
+        name: "三键 σ + 2π",
+        label: "三键",
+        orbitalModel: "sp",
+        bondModel: "sigma2Pi",
+        molecule: "C2H2",
+        steps: ["sp 直线骨架", "σ 键形成", "第一组 π 键重叠", "第二组 π 键重叠", "乙炔球棍模型定型"],
+        color: "#b68cff"
+      }
+    ];
+
+    const ORBITAL_MODELS = {
+      s: {
+        id: "s",
+        name: "s 轨道",
+        label: "s",
+        geometry: "spherical",
+        directions: [[0, 0, 0]],
+        angleLabels: []
+      },
+      p: {
+        id: "p",
+        name: "三维 p 轨道",
+        label: "px / py / pz",
+        geometry: "orthogonal",
+        directions: [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]],
+        angleLabels: ["90\u00b0", "90\u00b0", "90\u00b0"]
+      },
+      sp: {
+        id: "sp",
+        name: "sp 杂化轨道",
+        label: "sp",
+        geometry: "linear",
+        directions: [[1, 0, 0], [-1, 0, 0]],
+        angleLabels: ["180\u00b0"]
+      },
+      sp2: {
+        id: "sp2",
+        name: "sp² 杂化轨道",
+        label: "sp²",
+        geometry: "trigonal planar",
+        directions: [[1, 0, 0], [-0.5, 0.866, 0], [-0.5, -0.866, 0]],
+        angleLabels: ["120\u00b0", "120\u00b0", "120\u00b0"]
+      },
+      sp3: {
+        id: "sp3",
+        name: "sp³ 杂化轨道",
+        label: "sp³",
+        geometry: "tetrahedral",
+        directions: [[1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1]],
+        angleLabels: ["109.5\u00b0", "109.5\u00b0", "109.5\u00b0"]
+      }
+    };
+
+    const BOND_MODELS = {
+      sigma: {
+        id: "sigma",
+        name: "σ 键",
+        label: "σ",
+        kind: "sigma",
+        components: [{ type: "sigma", axis: "x", count: 1 }],
+        description: "头碰头重叠"
+      },
+      pi: {
+        id: "pi",
+        name: "π 键",
+        label: "π",
+        kind: "pi",
+        components: [{ type: "pi", axis: "z", count: 1 }],
+        description: "侧向重叠"
+      },
+      sigmaPi: {
+        id: "sigmaPi",
+        name: "σ + π 键",
+        label: "σ + π",
+        kind: "sigmaPi",
+        components: [
+          { type: "sigma", axis: "x", count: 1 },
+          { type: "pi", axis: "z", count: 1 }
+        ],
+        description: "一个 σ 键和一个 π 键"
+      },
+      sigma2Pi: {
+        id: "sigma2Pi",
+        name: "σ + 2π 键",
+        label: "σ + 2π",
+        kind: "sigma2Pi",
+        components: [
+          { type: "sigma", axis: "x", count: 1 },
+          { type: "pi", axis: "y", count: 1 },
+          { type: "pi", axis: "z", count: 1 }
+        ],
+        description: "一个 σ 键和两个互相垂直的 π 键"
+      }
+    };
+
+    const MOLECULES = {
+      CH4: {
+        id: "CH4",
+        name: "甲烷 CH₄",
+        label: "CH₄",
+        hybrid: "sp3",
+        atoms: [
+          ["C", 0, 0, 0],
+          ["H", 1, 1, 1],
+          ["H", -1, -1, 1],
+          ["H", -1, 1, -1],
+          ["H", 1, -1, -1]
+        ],
+        bonds: [[0, 1], [0, 2], [0, 3], [0, 4]],
+        sigmaBonds: [
+          { atoms: [0, 1], hybrids: ["sp3", "s"] },
+          { atoms: [0, 2], hybrids: ["sp3", "s"] },
+          { atoms: [0, 3], hybrids: ["sp3", "s"] },
+          { atoms: [0, 4], hybrids: ["sp3", "s"] }
+        ],
+        piBonds: [],
+        lonePairs: [],
+        angleLabels: ["109.5\u00b0"]
+      },
+      NH3: {
+        id: "NH3",
+        name: "氨 NH₃",
+        label: "NH₃",
+        hybrid: "sp3",
+        atoms: [
+          ["N", 0, 0, 0.25],
+          ["H", 1.05, 0, -0.45],
+          ["H", -0.52, 0.9, -0.45],
+          ["H", -0.52, -0.9, -0.45]
+        ],
+        bonds: [[0, 1], [0, 2], [0, 3]],
+        sigmaBonds: [
+          { atoms: [0, 1], hybrids: ["sp3", "s"] },
+          { atoms: [0, 2], hybrids: ["sp3", "s"] },
+          { atoms: [0, 3], hybrids: ["sp3", "s"] }
+        ],
+        piBonds: [],
+        lonePairs: [
+          { atom: 0, direction: [0, 0, 1], hybrid: "sp3", label: "孤电子对" }
+        ],
+        angleLabels: ["107\u00b0"]
+      },
+      H2O: {
+        id: "H2O",
+        name: "水 H₂O",
+        label: "H₂O",
+        hybrid: "sp3",
+        atoms: [
+          ["O", 0, 0.05, 0],
+          ["H", 0.92, 0.72, -0.18],
+          ["H", -0.92, 0.72, -0.18]
+        ],
+        bonds: [[0, 1], [0, 2]],
+        sigmaBonds: [
+          { atoms: [0, 1], hybrids: ["sp3", "s"] },
+          { atoms: [0, 2], hybrids: ["sp3", "s"] }
+        ],
+        piBonds: [],
+        lonePairs: [
+          { atom: 0, direction: [0, -0.85, 0.7], hybrid: "sp3", label: "孤电子对" },
+          { atom: 0, direction: [0, -0.85, -0.7], hybrid: "sp3", label: "孤电子对" }
+        ],
+        angleLabels: ["104.5\u00b0"]
+      },
+      BF3: {
+        id: "BF3",
+        name: "三氟化硼 BF₃",
+        label: "BF₃",
+        hybrid: "sp2",
+        atoms: [
+          ["B", 0, 0, 0],
+          ["F", 1.55, 0, 0],
+          ["F", -0.775, 1.342, 0],
+          ["F", -0.775, -1.342, 0]
+        ],
+        bonds: [[0, 1], [0, 2], [0, 3]],
+        sigmaBonds: [
+          { atoms: [0, 1], hybrids: ["sp2", "p"] },
+          { atoms: [0, 2], hybrids: ["sp2", "p"] },
+          { atoms: [0, 3], hybrids: ["sp2", "p"] }
+        ],
+        piBonds: [],
+        lonePairs: [],
+        angleLabels: ["120\u00b0"]
+      },
+      CO2: {
+        id: "CO2",
+        name: "二氧化碳 CO₂",
+        label: "CO₂",
+        hybrid: "sp",
+        atoms: [
+          ["O", -1.35, 0, 0],
+          ["C", 0, 0, 0],
+          ["O", 1.35, 0, 0]
+        ],
+        bonds: [[1, 0], [1, 2]],
+        sigmaBonds: [
+          { atoms: [1, 0], hybrids: ["sp", "sp2"] },
+          { atoms: [1, 2], hybrids: ["sp", "sp2"] }
+        ],
+        piBonds: [
+          { atoms: [1, 0], axis: "z", plane: "xy", label: "C=O π" },
+          { atoms: [1, 2], axis: "y", plane: "xz", label: "C=O π" }
+        ],
+        lonePairs: [
+          { atom: 0, direction: [-0.45, 0.9, 0], hybrid: "sp2", label: "孤电子对" },
+          { atom: 0, direction: [-0.45, -0.9, 0], hybrid: "sp2", label: "孤电子对" },
+          { atom: 2, direction: [0.45, 0.9, 0], hybrid: "sp2", label: "孤电子对" },
+          { atom: 2, direction: [0.45, -0.9, 0], hybrid: "sp2", label: "孤电子对" }
+        ],
+        angleLabels: ["180\u00b0"]
+      },
+      C2H4: {
+        id: "C2H4",
+        name: "乙烯 C₂H₄",
+        label: "C₂H₄",
+        hybrid: "sp2",
+        atoms: [
+          ["C", -0.67, 0, 0],
+          ["C", 0.67, 0, 0],
+          ["H", -1.25, 0.95, 0],
+          ["H", -1.25, -0.95, 0],
+          ["H", 1.25, 0.95, 0],
+          ["H", 1.25, -0.95, 0]
+        ],
+        bonds: [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5]],
+        sigmaBonds: [
+          { atoms: [0, 1], hybrids: ["sp2", "sp2"] },
+          { atoms: [0, 2], hybrids: ["sp2", "s"] },
+          { atoms: [0, 3], hybrids: ["sp2", "s"] },
+          { atoms: [1, 4], hybrids: ["sp2", "s"] },
+          { atoms: [1, 5], hybrids: ["sp2", "s"] }
+        ],
+        piBonds: [
+          { atoms: [0, 1], axis: "z", plane: "xy", label: "π 键" }
+        ],
+        lonePairs: [],
+        angleLabels: ["120\u00b0"]
+      },
+      C2H2: {
+        id: "C2H2",
+        name: "乙炔 C₂H₂",
+        label: "C₂H₂",
+        hybrid: "sp",
+        atoms: [
+          ["H", -1.7, 0, 0],
+          ["C", -0.6, 0, 0],
+          ["C", 0.6, 0, 0],
+          ["H", 1.7, 0, 0]
+        ],
+        bonds: [[1, 2], [1, 0], [2, 3]],
+        sigmaBonds: [
+          { atoms: [1, 2], hybrids: ["sp", "sp"] },
+          { atoms: [1, 0], hybrids: ["sp", "s"] },
+          { atoms: [2, 3], hybrids: ["sp", "s"] }
+        ],
+        piBonds: [
+          { atoms: [1, 2], axis: "z", plane: "xy", label: "π 键" },
+          { atoms: [1, 2], axis: "y", plane: "xz", label: "π 键" }
+        ],
+        lonePairs: [],
+        angleLabels: ["180\u00b0"]
+      }
+    };
+    function getTheme(id) {
+      return THEMES.find((theme) => theme.id === id)
+        || THEMES.find((theme) => theme.id === app.topicId)
+        || THEMES.find((theme) => theme.id === "orbital-structure");
+    }
+
+    function getLibraryGroups() {
+      return [
+        { id: "themes", label: "主题", items: THEMES },
+        { id: "orbitals", label: "轨道模型", items: Object.values(ORBITAL_MODELS) },
+        { id: "bonds", label: "键型模型", items: Object.values(BOND_MODELS) },
+        { id: "molecules", label: "分子模型", items: Object.values(MOLECULES) }
+      ];
+    }
+
+    function runSelfTests() {
+      const assert = (condition, message) => {
+        if (!condition) {
+          throw new Error(`Hybrid orbital model self-test failed: ${message}`);
+        }
+      };
+
+      assert(Array.isArray(THEMES), "THEMES should be an array");
+      assert(THEMES.length === 4, "expected 4 themes");
+      assert(Object.keys(ORBITAL_MODELS).length === 5, "expected 5 orbital models");
+      assert(Object.keys(BOND_MODELS).length === 4, "expected 4 bond models");
+      assert(Object.keys(MOLECULES).length === 7, "expected 7 molecule models");
+      assert(THEMES.find((theme) => theme.id === "double-bond"), "THEMES.find should locate double-bond");
+      assert(Object.values(ORBITAL_MODELS).every((model) => model.name), "orbital models should expose name");
+      assert(Object.values(BOND_MODELS).every((model) => model.name), "bond models should expose name");
+      assert(Object.values(MOLECULES).every((model) => model.name), "molecule models should expose name");
+      assert(BOND_MODELS.sigma.kind === "sigma", "sigma bond kind should be sigma");
+      assert(BOND_MODELS.pi.kind === "pi", "pi bond kind should be pi");
+      assert(BOND_MODELS.sigmaPi.kind === "sigmaPi", "sigmaPi bond kind should be sigmaPi");
+      assert(BOND_MODELS.sigma2Pi.kind === "sigma2Pi", "sigma2Pi bond kind should be sigma2Pi");
+      assert(ORBITAL_MODELS.p.directions.length === 6, "p orbital model should show px, py, and pz directions");
+      assert(ORBITAL_MODELS.p.angleLabels.includes("90\u00b0"), "p orbital axes should show perpendicular orientation");
+      assert(MOLECULES.CH4.hybrid === "sp3", "CH4 should use sp3 hybridization");
+      assert(MOLECULES.C2H4.hybrid === "sp2", "C2H4 should use sp2 hybridization");
+      assert(MOLECULES.C2H2.hybrid === "sp", "C2H2 should use sp hybridization");
+      assert(MOLECULES.CO2.piBonds.map((bond) => bond.axis).join(",") === "z,y", "CO2 pi bonds should be perpendicular");
+      assert(getOrbitalColor("sp3", "C") !== getOrbitalColor("s", "H"), "C and H orbital overlays should use different colors");
+      assert(getOrbitalColor("sp2", "C") !== getOrbitalColor("sp2", "O"), "C and O orbital overlays should use different colors");
+      assert(getOrbitalColor("sp2", "O") !== getOrbitalColor("p", "O"), "O sp2 and O p orbitals should use different colors");
+      assert(app.settings.autoRotate === false, "auto rotate should default to off");
+      assert(THEMES.find((theme) => theme.id === "double-bond").bondModel === "sigmaPi", "double-bond theme should use sigmaPi");
+      assert(typeof populateTopicSelect === "function", "populateTopicSelect should exist");
+      assert(typeof setMode === "function", "setMode should exist");
+      assert(typeof clampStep === "function", "clampStep should exist");
+      assert(typeof setTopic === "function", "setTopic should exist");
+      assert(typeof nextStep === "function", "nextStep should exist");
+      assert(typeof prevStep === "function", "prevStep should exist");
+      assert(typeof resetView === "function", "resetView should exist");
+      assert(typeof setPlaying === "function", "setPlaying should exist");
+      assert(typeof setupControls === "function", "setupControls should exist");
+      assert(typeof tickPlayback === "function", "tickPlayback should exist");
+      assert(typeof renderLibrary === "function", "renderLibrary should exist");
+      assert(typeof renderExplorerSelection === "function", "renderExplorerSelection should exist");
+      assert(getExplorerModel(app.explorerSelection.type, app.explorerSelection.id), "default explorer selection should be valid");
+
+      const libraryCounts = getLibraryGroups().reduce((counts, group) => {
+        const type = getLibraryGroupType(group);
+        if (type) {
+          const validItems = Array.isArray(group.items)
+            ? group.items.filter((item) => item?.id && getExplorerModel(type, item.id))
+            : [];
+          counts[type] = (counts[type] || 0) + validItems.length;
+        }
+        return counts;
+      }, {});
+      assert(libraryCounts.orbital === 5, "library should include 5 orbitals");
+      assert(libraryCounts.bond === 4, "library should include 4 bonds");
+      assert(libraryCounts.molecule === 7, "library should include 7 molecules");
+
+      Object.values(MOLECULES).forEach((model) => {
+        assert(Array.isArray(model.atoms), `${model.id} atoms should be an array`);
+        assert(model.atoms.every((atom) => Array.isArray(atom) && atom.length === 4), `${model.id} atoms should be [symbol, x, y, z] tuples`);
+        model.atoms.forEach((atom, atomIndex) => {
+          assert(typeof atom[0] === "string", `${model.id} atom ${atomIndex} symbol should be a string`);
+          assert(ELEMENTS[atom[0]], `${model.id} atom ${atomIndex} symbol should exist in ELEMENTS`);
+          assert(Number.isFinite(atom[1]) && Number.isFinite(atom[2]) && Number.isFinite(atom[3]), `${model.id} atom ${atomIndex} coordinates should be finite numbers`);
+        });
+
+        assert(Array.isArray(model.bonds), `${model.id} bonds should be an array`);
+        assert(model.bonds.every((bond) => Array.isArray(bond) && bond.length === 2), `${model.id} bonds should be index pairs`);
+        model.bonds.forEach((bond, bondIndex) => {
+          assert(Number.isInteger(bond[0]) && Number.isInteger(bond[1]), `${model.id} bond ${bondIndex} indices should be integers`);
+          assert(bond[0] >= 0 && bond[0] < model.atoms.length, `${model.id} bond ${bondIndex} first index should be in bounds`);
+          assert(bond[1] >= 0 && bond[1] < model.atoms.length, `${model.id} bond ${bondIndex} second index should be in bounds`);
+        });
+
+        assert(Array.isArray(model.sigmaBonds), `${model.id} sigmaBonds should be an array`);
+        assert(model.sigmaBonds.length === model.bonds.length, `${model.id} should describe one sigma orbital overlay per structural bond`);
+        model.sigmaBonds.forEach((sigmaBond, sigmaIndex) => {
+          assert(Array.isArray(sigmaBond.atoms) && sigmaBond.atoms.length === 2, `${model.id} sigmaBond ${sigmaIndex} should reference two atoms`);
+          assert(sigmaBond.atoms.every((atomIndex) => Number.isInteger(atomIndex) && atomIndex >= 0 && atomIndex < model.atoms.length), `${model.id} sigmaBond ${sigmaIndex} atom indices should be in bounds`);
+          assert(Array.isArray(sigmaBond.hybrids) && sigmaBond.hybrids.length === 2, `${model.id} sigmaBond ${sigmaIndex} should describe both orbital shapes`);
+        });
+
+        assert(Array.isArray(model.piBonds), `${model.id} piBonds should be an array`);
+        model.piBonds.forEach((piBond, piIndex) => {
+          assert(Array.isArray(piBond.atoms) && piBond.atoms.length === 2, `${model.id} piBond ${piIndex} should reference two atoms`);
+          assert(piBond.atoms.every((atomIndex) => Number.isInteger(atomIndex) && atomIndex >= 0 && atomIndex < model.atoms.length), `${model.id} piBond ${piIndex} atom indices should be in bounds`);
+          assert(piBond.axis === "y" || piBond.axis === "z", `${model.id} piBond ${piIndex} should use a visible perpendicular axis`);
+        });
+
+        assert(Array.isArray(model.lonePairs), `${model.id} lonePairs should be an array`);
+        model.lonePairs.forEach((lonePair, lonePairIndex) => {
+          assert(Number.isInteger(lonePair.atom) && lonePair.atom >= 0 && lonePair.atom < model.atoms.length, `${model.id} lonePair ${lonePairIndex} atom index should be in bounds`);
+          assert(Array.isArray(lonePair.direction) && lonePair.direction.length === 3, `${model.id} lonePair ${lonePairIndex} direction should be a vector`);
+        });
+
+        assert(Array.isArray(model.angleLabels), `${model.id} angleLabels should be an array`);
+        assert(model.angleLabels.every((angle) => typeof angle === "string"), `${model.id} angleLabels should contain strings`);
+      });
+
+      return true;
+    }
+
+    runSelfTests();
+
+    function normalizeVector(values) {
+      const fallback = new THREE.Vector3(0, 1, 0);
+
+      if (!values) {
+        return fallback;
+      }
+
+      const vector = Array.isArray(values)
+        ? new THREE.Vector3(Number(values[0]), Number(values[1]), Number(values[2]))
+        : values.clone?.();
+
+      if (!vector || !Number.isFinite(vector.x) || !Number.isFinite(vector.y) || !Number.isFinite(vector.z) || vector.lengthSq() === 0) {
+        return fallback;
+      }
+
+      return vector.normalize();
+    }
+
+    function makeMaterial(color, opacity = 1, transparent = false) {
+      return new THREE.MeshStandardMaterial({
+        color,
+        opacity,
+        transparent: transparent || opacity < 1,
+        roughness: 0.45,
+        metalness: 0.04,
+        depthWrite: opacity >= 1
+      });
+    }
+
+    function makeOrbitalLobe(direction, color, opacity) {
+      const axis = normalizeVector(direction);
+      const group = new THREE.Group();
+      const geometry = new THREE.SphereGeometry(0.46, 32, 18);
+      const lobe = new THREE.Mesh(geometry, makeMaterial(color, opacity, true));
+
+      lobe.scale.set(0.72, 1.35, 0.72);
+      lobe.position.y = 0.72;
+      group.add(lobe);
+
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 20, 12),
+        makeMaterial("#f6fbff", Math.min(0.8, opacity + 0.1), true)
+      );
+      core.position.y = 0.08;
+      group.add(core);
+
+      group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+      return group;
+    }
+
+    function makeSOrbital(opacity, color = "#74c7ff") {
+      const group = new THREE.Group();
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.9, 40, 24),
+        makeMaterial(color, opacity, true)
+      );
+
+      group.add(sphere);
+      return group;
+    }
+
+    function makePlainOrbitalLobe(direction, color, opacity, scale = 1) {
+      const axis = normalizeVector(direction);
+      const lobe = new THREE.Mesh(
+        new THREE.SphereGeometry(0.38, 32, 18),
+        makeMaterial(color, opacity, true)
+      );
+      lobe.position.copy(axis.clone().multiplyScalar(0.62 * scale));
+      lobe.scale.set(0.58 * scale, 1.16 * scale, 0.58 * scale);
+      lobe.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+      return lobe;
+    }
+
+    function makePOrbital(opacity) {
+      const group = new THREE.Group();
+      const axes = [
+        { directions: [[1, 0, 0], [-1, 0, 0]], color: "#74c7ff", label: "px", labelPosition: [1.48, 0.12, 0] },
+        { directions: [[0, 1, 0], [0, -1, 0]], color: "#ffad5c", label: "py", labelPosition: [0.72, 1.62, 0] },
+        { directions: [[0, 0, 1], [0, 0, -1]], color: "#45e0a6", label: "pz", labelPosition: [0.72, -0.42, 1.28] }
+      ];
+
+      axes.forEach((axis) => {
+        axis.directions.forEach((direction) => {
+          group.add(makePlainOrbitalLobe(direction, axis.color, Math.min(0.66, opacity), 0.9));
+        });
+        addLabel(group, axis.label, axis.labelPosition);
+      });
+      group.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 18, 12),
+        makeMaterial("#f6fbff", 0.88, true)
+      ));
+      return group;
+    }
+
+    function makeHybridOrbital(model, opacity) {
+      const orbital = typeof model === "string" ? ORBITAL_MODELS[model] : model;
+      const group = new THREE.Group();
+
+      if (!orbital || orbital.id === "s" || orbital.geometry === "spherical") {
+        group.add(makeSOrbital(opacity));
+        return group;
+      }
+
+      if (orbital.id === "p") {
+        group.add(makePOrbital(opacity));
+        return group;
+      }
+
+      const colors = ["#74c7ff", "#45e0a6", "#ffad5c", "#b68cff"];
+      orbital.directions.forEach((direction, index) => {
+        group.add(makeOrbitalLobe(direction, colors[index % colors.length], opacity));
+      });
+
+      group.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 18, 12),
+        makeMaterial("#f6fbff", 0.9, true)
+      ));
+
+      return group;
+    }
+
+    function makeAtom(symbol, x, y, z) {
+      const element = ELEMENTS[symbol] || ELEMENTS.F;
+      const atom = new THREE.Mesh(
+        new THREE.SphereGeometry(Math.max(0.16, element.radius * 0.34), 32, 18),
+        makeMaterial(element.color, 1, false)
+      );
+
+      atom.position.set(x, y, z);
+      atom.userData = { symbol, element };
+      return atom;
+    }
+
+    function makeCylinderBetween(start, end, radius, color) {
+      const from = Array.isArray(start) ? new THREE.Vector3(start[0], start[1], start[2]) : start.clone();
+      const to = Array.isArray(end) ? new THREE.Vector3(end[0], end[1], end[2]) : end.clone();
+      const delta = new THREE.Vector3().subVectors(to, from);
+      const length = delta.length();
+      const cylinder = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, length || 0.0001, 24),
+        makeMaterial(color, 1, false)
+      );
+
+      cylinder.position.copy(from).add(to).multiplyScalar(0.5);
+      if (length > 0) {
+        cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+      }
+
+      return cylinder;
+    }
+
+    function makeBondStick(atomA, atomB) {
+      return makeCylinderBetween(
+        [atomA[1], atomA[2], atomA[3]],
+        [atomB[1], atomB[2], atomB[3]],
+        0.045,
+        "#d8e6f2"
+      );
+    }
+
+    function makeTextSprite(text, color = "#f6fbff") {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      const fontSize = 48;
+
+      context.font = `${fontSize}px Microsoft YaHei, PingFang SC, Arial, sans-serif`;
+      const metrics = context.measureText(text);
+      canvas.width = Math.ceil(metrics.width + 32);
+      canvas.height = 80;
+
+      context.font = `${fontSize}px Microsoft YaHei, PingFang SC, Arial, sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillStyle = color;
+      context.shadowColor = "rgba(0, 0, 0, 0.55)";
+      context.shadowBlur = 8;
+      context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false
+      }));
+
+      sprite.scale.set(canvas.width / 210, canvas.height / 210, 1);
+      return sprite;
+    }
+
+    function createPane(host, name) {
+      const element = typeof host === "string" ? document.getElementById(host) : host;
+
+      if (!element) {
+        return null;
+      }
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      const root = new THREE.Group();
+
+      camera.position.set(0, 0.25, 6);
+      scene.add(root);
+      scene.add(new THREE.HemisphereLight("#f6fbff", "#243447", 1.8));
+
+      const keyLight = new THREE.DirectionalLight("#ffffff", 1.2);
+      keyLight.position.set(3, 4, 5);
+      scene.add(keyLight);
+
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.style.display = "block";
+      renderer.domElement.style.width = "100%";
+      renderer.domElement.style.height = "100%";
+      element.appendChild(renderer.domElement);
+
+      const pane = { name, host: element, scene, camera, renderer, root };
+      attachPointerControls(pane);
+      resizePane(pane);
+      return pane;
+    }
+
+    function clampRootRotationX(pane) {
+      if (!pane?.root) {
+        return;
+      }
+
+      pane.root.rotation.x = THREE.MathUtils.clamp(pane.root.rotation.x, -1.35, 1.35);
+    }
+
+    function getRotationTargetPanes(pane) {
+      const triptychPaneNames = ["orbitalPane", "moleculePane"];
+      const shouldSyncTriptychDrag = (
+        app.mode === "triptych"
+        && app.settings.syncRotate
+        && triptychPaneNames.includes(pane?.name)
+      );
+
+      if (!shouldSyncTriptychDrag) {
+        return pane ? [pane] : [];
+      }
+
+      return triptychPaneNames
+        .map((name) => app.panes[name])
+        .filter(Boolean);
+    }
+
+    function normalizeWheelDeltaY(event) {
+      const lineHeight = 16;
+      const pageHeight = paneSafeHostHeight(event.currentTarget) || window.innerHeight || 800;
+
+      if (event.deltaMode === 1) {
+        return event.deltaY * lineHeight;
+      }
+
+      if (event.deltaMode === 2) {
+        return event.deltaY * pageHeight;
+      }
+
+      return event.deltaY;
+    }
+
+    function paneSafeHostHeight(target) {
+      const host = target?.parentElement;
+      return host?.clientHeight || 0;
+    }
+
+    function attachPointerControls(pane) {
+      if (!pane || pane.pointerControlsAttached) {
+        return;
+      }
+
+      const canvas = pane.renderer?.domElement;
+      if (!canvas) {
+        return;
+      }
+
+      const dragState = {
+        active: false,
+        pointerId: null,
+        lastX: 0,
+        lastY: 0
+      };
+      const rotationScale = 0.006;
+      const zoomScale = 0.004;
+      const minCameraZ = 3.2;
+      const maxCameraZ = 10;
+
+      const releasePointer = (event) => {
+        if (!dragState.active || dragState.pointerId !== event.pointerId) {
+          return;
+        }
+
+        if (canvas.hasPointerCapture?.(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+
+        dragState.active = false;
+        dragState.pointerId = null;
+        pane.host.classList.remove("is-dragging");
+      };
+
+      canvas.addEventListener("pointerdown", (event) => {
+        if (event.isPrimary === false || event.button !== 0) {
+          return;
+        }
+
+        dragState.active = true;
+        dragState.pointerId = event.pointerId;
+        dragState.lastX = event.clientX;
+        dragState.lastY = event.clientY;
+        pane.host.classList.add("is-dragging");
+        canvas.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (!dragState.active || dragState.pointerId !== event.pointerId) {
+          return;
+        }
+
+        const deltaX = event.clientX - dragState.lastX;
+        const deltaY = event.clientY - dragState.lastY;
+        dragState.lastX = event.clientX;
+        dragState.lastY = event.clientY;
+
+        getRotationTargetPanes(pane).forEach((targetPane) => {
+          targetPane.root.rotation.y += deltaX * rotationScale;
+          targetPane.root.rotation.x += deltaY * rotationScale;
+          clampRootRotationX(targetPane);
+        });
+        event.preventDefault();
+      });
+
+      canvas.addEventListener("pointerup", releasePointer);
+      canvas.addEventListener("pointercancel", releasePointer);
+      canvas.addEventListener("lostpointercapture", () => {
+        dragState.active = false;
+        dragState.pointerId = null;
+        pane.host.classList.remove("is-dragging");
+      });
+
+      canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const normalizedDeltaY = THREE.MathUtils.clamp(normalizeWheelDeltaY(event), -240, 240);
+        pane.camera.position.z = THREE.MathUtils.clamp(
+          pane.camera.position.z + normalizedDeltaY * zoomScale,
+          minCameraZ,
+          maxCameraZ
+        );
+        pane.camera.lookAt(0, 0, 0);
+        pane.camera.updateProjectionMatrix();
+      }, { passive: false });
+
+      pane.pointerControlsAttached = true;
+    }
+
+    function resizePane(pane) {
+      if (!pane) {
+        return;
+      }
+
+      const { width, height } = pane.host.getBoundingClientRect();
+      const parentRect = pane.host.parentElement?.getBoundingClientRect();
+      const fallbackWidth = parentRect?.width || pane.host.clientWidth || 640;
+      const fallbackHeight = parentRect?.height || pane.host.clientHeight || 420;
+      const safeWidth = Math.max(320, Math.floor(width || fallbackWidth));
+      const safeHeight = Math.max(240, Math.floor(height || fallbackHeight));
+
+      pane.camera.aspect = safeWidth / safeHeight;
+      pane.camera.updateProjectionMatrix();
+      pane.renderer.setSize(safeWidth, safeHeight, false);
+    }
+
+    function resizeAllPanes() {
+      Object.values(app.panes).forEach(resizePane);
+    }
+
+    function clearPane(pane) {
+      if (!pane?.root) {
+        return;
+      }
+
+      while (pane.root.children.length) {
+        const child = pane.root.children[0];
+        child.traverse((node) => {
+          if (node.geometry) {
+            node.geometry.dispose();
+          }
+          if (node.material) {
+            const materials = Array.isArray(node.material) ? node.material : [node.material];
+            materials.forEach((material) => {
+              if (material.map) {
+                material.map.dispose();
+              }
+              material.dispose();
+            });
+          }
+        });
+        pane.root.remove(child);
+      }
+    }
+
+    function disposePane(pane) {
+      if (!pane) {
+        return;
+      }
+
+      clearPane(pane);
+      pane.host?.classList.remove("is-dragging");
+      pane.renderer?.dispose();
+      pane.renderer?.domElement?.remove();
+    }
+
+    function renderPane(pane) {
+      if (!pane) {
+        return;
+      }
+
+      pane.renderer.render(pane.scene, pane.camera);
+    }
+
+    function addLabel(root, text, position) {
+      if (!root || !app.settings.labels || !text) {
+        return null;
+      }
+
+      const label = makeTextSprite(String(text));
+      const labelPosition = Array.isArray(position)
+        ? new THREE.Vector3(position[0], position[1], position[2])
+        : position?.clone?.() || new THREE.Vector3();
+
+      label.position.copy(labelPosition);
+      root.add(label);
+      return label;
+    }
+
+    function addAngleLabels(root, labels) {
+      if (!root || !app.settings.angles || !Array.isArray(labels)) {
+        return;
+      }
+
+      const uniqueLabels = [...new Set(labels.filter(Boolean))];
+      uniqueLabels.forEach((label, index) => {
+        addLabel(root, label, [0, 1.62 + index * 0.28, 0]);
+      });
+    }
+
+    function buildOrbitalView(pane, orbitalId) {
+      if (!pane) {
+        return;
+      }
+
+      const model = ORBITAL_MODELS[orbitalId] || ORBITAL_MODELS.sp3;
+      clearPane(pane);
+      if (!pane.hasRenderedOrbitalView) {
+        pane.root.rotation.set(0.15, 0.35, 0);
+        pane.hasRenderedOrbitalView = true;
+      }
+
+      if (app.settings.orbitals) {
+        pane.root.add(makeHybridOrbital(model, app.settings.opacity));
+      }
+
+      addLabel(pane.root, model.label || model.name, [0, -1.45, 0]);
+      addAngleLabels(pane.root, model.angleLabels);
+    }
+
+    function getAtomPosition(atom) {
+      return new THREE.Vector3(atom[1], atom[2], atom[3]);
+    }
+
+    function getPerpendicularVector(direction) {
+      const axis = normalizeVector(direction);
+      const reference = Math.abs(axis.dot(new THREE.Vector3(0, 1, 0))) > 0.86
+        ? new THREE.Vector3(1, 0, 0)
+        : new THREE.Vector3(0, 1, 0);
+      return new THREE.Vector3().crossVectors(axis, reference).normalize();
+    }
+
+    function getBondDirection(model, fromIndex, toIndex) {
+      const from = getAtomPosition(model.atoms[fromIndex]);
+      const to = getAtomPosition(model.atoms[toIndex]);
+      return new THREE.Vector3().subVectors(to, from).normalize();
+    }
+
+    function getOrbitalColor(hybrid, atomSymbol) {
+      if (atomSymbol === "O" && hybrid === "p") {
+        return "#38d5c8";
+      }
+
+      const colorsByAtom = {
+        H: "#dff4ff",
+        C: "#ff6b7a",
+        N: "#74c7ff",
+        O: "#ffd76a",
+        B: "#ffad5c",
+        F: "#45e0a6"
+      };
+
+      return colorsByAtom[atomSymbol] || "#b68cff";
+    }
+
+    function addBondingOrbital(root, atom, direction, hybrid, color, opacity) {
+      const atomPosition = getAtomPosition(atom);
+
+      if (hybrid === "s") {
+        const sOrbital = makeSOrbital(Math.min(0.58, opacity * 0.88), color);
+        sOrbital.position.copy(atomPosition);
+        sOrbital.scale.setScalar(0.28);
+        root.add(sOrbital);
+        return;
+      }
+
+      const scale = hybrid === "p" ? 0.36 : 0.42;
+      root.add(makeBondLobe(atomPosition, direction, color, Math.min(0.72, opacity), scale));
+    }
+
+    function addSigmaBondOverlay(root, model, sigmaBond) {
+      const [fromIndex, toIndex] = sigmaBond.atoms;
+      const atomA = model.atoms[fromIndex];
+      const atomB = model.atoms[toIndex];
+      const direction = getBondDirection(model, fromIndex, toIndex);
+      const reverseDirection = direction.clone().multiplyScalar(-1);
+      const [hybridA, hybridB] = sigmaBond.hybrids;
+      const opacity = Math.max(0.22, app.settings.opacity * 0.86);
+      const from = getAtomPosition(atomA);
+      const to = getAtomPosition(atomB);
+      const midpoint = from.clone().add(to).multiplyScalar(0.5);
+
+      addBondingOrbital(root, atomA, direction, hybridA, getOrbitalColor(hybridA, atomA[0]), opacity);
+      addBondingOrbital(root, atomB, reverseDirection, hybridB, getOrbitalColor(hybridB, atomB[0]), opacity);
+
+      if (app.settings.overlap) {
+        const overlap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.32, 28, 16),
+          makeMaterial("#ffd76a", Math.min(0.42, app.settings.opacity * 0.55), true)
+        );
+        overlap.position.copy(midpoint);
+        overlap.scale.set(1.45, 0.42, 0.42);
+        overlap.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), direction);
+        root.add(overlap);
+      }
+    }
+
+    function makePiCloud(center, direction, color, opacity, length) {
+      const cloud = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 48, 24),
+        makeMaterial(color, opacity, true)
+      );
+      cloud.position.copy(center);
+      cloud.scale.set(Math.max(0.88, length * 0.48), 0.34, 0.62);
+      cloud.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), direction);
+      return cloud;
+    }
+
+    function makePiPlane(center, normal, direction, length) {
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(Math.max(1.8, length + 0.7), 1.48),
+        makeMaterial("#b48a96", 0.2, true)
+      );
+      plane.position.copy(center);
+      plane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+
+      const projectedX = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+      const signedAngle = projectedX.angleTo(direction) * Math.sign(projectedX.clone().cross(direction).dot(normal) || 1);
+      plane.rotateZ(signedAngle);
+      return plane;
+    }
+
+    function addAtomicPiOrbital(root, atomPosition, atomIndex, axisKey, normal, color, opacity) {
+      const key = `${atomIndex}:${axisKey}`;
+      root.userData.piOrbitalKeys = root.userData.piOrbitalKeys || new Set();
+      if (root.userData.piOrbitalKeys.has(key)) {
+        return;
+      }
+      root.userData.piOrbitalKeys.add(key);
+
+      [1, -1].forEach((sign) => {
+        const lobe = new THREE.Mesh(
+          new THREE.SphereGeometry(0.34, 32, 18),
+          makeMaterial(color, opacity, true)
+        );
+        const lobeDirection = normal.clone().multiplyScalar(sign);
+        lobe.position.copy(atomPosition).add(lobeDirection.clone().multiplyScalar(0.52));
+        lobe.scale.set(0.5, 0.9, 0.5);
+        lobe.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), lobeDirection);
+        root.add(lobe);
+      });
+    }
+
+    function addPiBondOverlay(root, model, piBond, piIndex = 0) {
+      const [fromIndex, toIndex] = piBond.atoms;
+      const atomA = model.atoms[fromIndex];
+      const atomB = model.atoms[toIndex];
+      const from = getAtomPosition(model.atoms[fromIndex]);
+      const to = getAtomPosition(model.atoms[toIndex]);
+      const direction = new THREE.Vector3().subVectors(to, from).normalize();
+      const midpoint = from.clone().add(to).multiplyScalar(0.5);
+      const normal = normalizeVector(piBond.axis === "y" ? [0, 1, 0] : [0, 0, 1]);
+      const length = from.distanceTo(to);
+      const opacity = Math.max(0.24, app.settings.opacity * 0.76);
+      const offset = 0.72 + piIndex * 0.12;
+
+      root.add(makePiPlane(midpoint, normal, direction, length));
+      root.add(makePiCloud(midpoint.clone().add(normal.clone().multiplyScalar(offset)), direction, "#45e0a6", opacity, length));
+      root.add(makePiCloud(midpoint.clone().add(normal.clone().multiplyScalar(-offset)), direction, "#45e0a6", opacity, length));
+      [from, to].forEach((atomPosition, atomIndex) => {
+        const sourceAtomIndex = atomIndex === 0 ? fromIndex : toIndex;
+        const atom = atomIndex === 0 ? atomA : atomB;
+        const color = getOrbitalColor("p", atom[0]);
+        addAtomicPiOrbital(root, atomPosition, sourceAtomIndex, piBond.axis || "z", normal, color, Math.min(0.42, opacity + 0.02));
+      });
+
+      addLabel(root, piBond.label || "π", midpoint.clone()
+        .add(normal.clone().multiplyScalar(offset + 0.68))
+        .add(new THREE.Vector3(0, 0.34, 0)));
+    }
+
+    function addLonePairOverlay(root, model, lonePair, labelText = "") {
+      const atom = model.atoms[lonePair.atom];
+      const origin = getAtomPosition(atom);
+      const direction = normalizeVector(lonePair.direction);
+      const opacity = Math.max(0.34, app.settings.opacity * 0.92);
+      const lobe = makeBondLobe(origin, direction, "#ffd76a", opacity, 0.43);
+      const endpoint = origin.clone().add(direction.clone().multiplyScalar(0.86));
+      const side = getPerpendicularVector(direction);
+
+      root.add(lobe);
+      [-1, 1].forEach((sign) => {
+        const electron = new THREE.Mesh(
+          new THREE.SphereGeometry(0.055, 16, 10),
+          makeMaterial("#fff7bf", 0.95, true)
+        );
+        electron.position.copy(endpoint).add(side.clone().multiplyScalar(sign * 0.08));
+        root.add(electron);
+      });
+
+      if (labelText) {
+        addLabel(root, labelText, endpoint.clone().add(direction.clone().multiplyScalar(0.3)));
+      }
+    }
+
+    function buildMoleculeView(pane, moleculeId) {
+      if (!pane) {
+        return;
+      }
+
+      const model = MOLECULES[moleculeId] || MOLECULES.CH4;
+      clearPane(pane);
+      if (!pane.hasRenderedMoleculeView) {
+        pane.root.rotation.set(0.3, -0.38, 0.04);
+        pane.hasRenderedMoleculeView = true;
+      }
+
+      const moleculeRoot = new THREE.Group();
+      pane.root.add(moleculeRoot);
+
+      if (app.settings.ballStick) {
+        model.bonds.forEach(([fromIndex, toIndex]) => {
+          const atomA = model.atoms[fromIndex];
+          const atomB = model.atoms[toIndex];
+          if (atomA && atomB) {
+            moleculeRoot.add(makeBondStick(atomA, atomB));
+          }
+        });
+
+        model.atoms.forEach(([symbol, x, y, z]) => {
+          moleculeRoot.add(makeAtom(symbol, x, y, z));
+          addLabel(moleculeRoot, symbol, [x, y + 0.42, z]);
+        });
+      }
+
+      if (app.settings.orbitals) {
+        (model.sigmaBonds || []).forEach((sigmaBond) => addSigmaBondOverlay(moleculeRoot, model, sigmaBond));
+        (model.piBonds || []).forEach((piBond, piIndex) => addPiBondOverlay(moleculeRoot, model, piBond, piIndex));
+        const lonePairCounts = (model.lonePairs || []).reduce((counts, lonePair) => {
+          counts.set(lonePair.atom, (counts.get(lonePair.atom) || 0) + 1);
+          return counts;
+        }, new Map());
+        const lonePairSeen = new Map();
+        (model.lonePairs || []).forEach((lonePair) => {
+          const seenCount = lonePairSeen.get(lonePair.atom) || 0;
+          const total = lonePairCounts.get(lonePair.atom) || 1;
+          const label = seenCount === 0
+            ? (total > 1 ? `${total} 对孤电子对` : lonePair.label || "孤电子对")
+            : "";
+          lonePairSeen.set(lonePair.atom, seenCount + 1);
+          addLonePairOverlay(moleculeRoot, model, lonePair, label);
+        });
+      }
+
+      addLabel(moleculeRoot, model.label || model.name, [0, -1.7, 0]);
+      addAngleLabels(moleculeRoot, model.angleLabels);
+    }
+
+    function makeBondLobe(position, direction, color, opacity, scale = 0.72) {
+      const lobe = makeOrbitalLobe(direction, color, opacity);
+      lobe.position.copy(position);
+      lobe.scale.setScalar(scale);
+      return lobe;
+    }
+
+    function addSigmaBond(root, separation, progress) {
+      const opacity = app.settings.opacity;
+      root.add(makeBondLobe(new THREE.Vector3(-separation / 2, 0, 0), [1, 0, 0], "#74c7ff", opacity));
+      root.add(makeBondLobe(new THREE.Vector3(separation / 2, 0, 0), [-1, 0, 0], "#ffad5c", opacity));
+
+      const bondLength = THREE.MathUtils.lerp(0.55, 1.55, progress);
+      root.add(makeCylinderBetween([-bondLength / 2, 0, 0], [bondLength / 2, 0, 0], 0.05, "#d8e6f2"));
+    }
+
+    function addPiBond(root, separation, axis, progress) {
+      const safeProgress = THREE.MathUtils.clamp(progress, 0, 1);
+      const opacity = app.settings.opacity * THREE.MathUtils.lerp(0.38, 0.92, safeProgress);
+      const direction = new THREE.Vector3(1, 0, 0);
+      const normal = normalizeVector(axis === "y" ? [0, 1, 0] : [0, 0, 1]);
+      const midpoint = new THREE.Vector3(0, 0, 0);
+      const offset = 0.82;
+      const left = new THREE.Vector3(-separation / 2, 0, 0);
+      const right = new THREE.Vector3(separation / 2, 0, 0);
+
+      root.add(makePiPlane(midpoint, normal, direction, separation + 0.52));
+      root.add(makePiCloud(midpoint.clone().add(normal.clone().multiplyScalar(offset)), direction, "#45e0a6", opacity, separation));
+      root.add(makePiCloud(midpoint.clone().add(normal.clone().multiplyScalar(-offset)), direction, "#45e0a6", opacity, separation));
+      root.add(makeBondLobe(left, normal, "#ff6b7a", Math.min(0.72, opacity + 0.08), 0.42));
+      root.add(makeBondLobe(left, normal.clone().multiplyScalar(-1), "#ff6b7a", Math.min(0.72, opacity + 0.08), 0.42));
+      root.add(makeBondLobe(right, normal, "#74c7ff", Math.min(0.72, opacity + 0.08), 0.42));
+      root.add(makeBondLobe(right, normal.clone().multiplyScalar(-1), "#74c7ff", Math.min(0.72, opacity + 0.08), 0.42));
+    }
+
+    function addOverlap(root, kind, progress, stage = "sigma") {
+      if (!app.settings.overlap || progress < 0.25) {
+        return;
+      }
+
+      const overlap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.64, 32, 18),
+        makeMaterial("#ffd76a", THREE.MathUtils.lerp(0.12, 0.5, progress), true)
+      );
+
+      overlap.scale.set(stage === "sigma" ? 1.25 : 1.6, 0.56, stage === "secondPi" ? 1.15 : 0.56);
+      root.add(overlap);
+    }
+
+    function buildBondView(pane, bondId, progress = 0, stepIndex = 99) {
+      if (!pane) {
+        return;
+      }
+
+      const model = BOND_MODELS[bondId] || BOND_MODELS.sigma;
+      const safeProgress = THREE.MathUtils.clamp(progress, 0, 1);
+      const separation = THREE.MathUtils.lerp(3.15, 1.62, safeProgress);
+
+      clearPane(pane);
+      if (!pane.hasRenderedBondView) {
+        pane.root.rotation.set(0.32, -0.55, 0.06);
+        pane.hasRenderedBondView = true;
+      }
+      pane.root.add(makeAtom("C", -separation / 2, 0, 0));
+      pane.root.add(makeAtom("C", separation / 2, 0, 0));
+
+      const showSigma = model.kind === "sigma" || model.kind === "sigmaPi" || model.kind === "sigma2Pi";
+      const showFirstPi = model.kind === "pi" || (model.kind === "sigmaPi" && stepIndex >= 2) || (model.kind === "sigma2Pi" && stepIndex >= 2);
+      const showSecondPi = model.kind === "sigma2Pi" && stepIndex >= 3;
+      const sigmaProgress = showSigma ? Math.min(1, safeProgress * 1.35) : 0;
+      const firstPiProgress = showFirstPi ? THREE.MathUtils.clamp((safeProgress - 0.42) / 0.38, 0.08, 1) : 0;
+      const secondPiProgress = showSecondPi ? THREE.MathUtils.clamp((safeProgress - 0.62) / 0.3, 0.08, 1) : 0;
+
+      if (showSigma) {
+        addSigmaBond(pane.root, separation, sigmaProgress);
+      }
+
+      if (showFirstPi) {
+        addPiBond(pane.root, separation, "z", firstPiProgress);
+      }
+
+      if (showSecondPi) {
+        addPiBond(pane.root, separation, "y", secondPiProgress);
+      }
+
+      if (showSecondPi) {
+        addOverlap(pane.root, model.kind, secondPiProgress, "secondPi");
+      } else if (showFirstPi && model.kind !== "sigma") {
+        addOverlap(pane.root, model.kind, firstPiProgress, "pi");
+      } else if (showSigma) {
+        addOverlap(pane.root, model.kind, sigmaProgress, "sigma");
+      }
+      addLabel(pane.root, model.label || model.name, [0, -1.65, 0]);
+    }
+
+    function setCaption(id, text) {
+      const element = document.getElementById(id);
+      if (element) {
+        element.textContent = text || "";
+      }
+    }
+
+    function renderTriptych() {
+      const theme = getTheme(app.topicId);
+      const orbitalId = theme.orbitalModel || theme.orbital || "sp3";
+      const bondId = theme.bondModel || theme.bond || "sigma";
+      const moleculeId = theme.moleculeModel || theme.molecule || "CH4";
+      const steps = Array.isArray(theme.steps) && theme.steps.length ? theme.steps : ["初始", "靠近", "重叠", "成键"];
+      const stepIndex = Math.max(0, Math.min(Number(app.stepIndex) || 0, steps.length - 1));
+      const progress = steps.length <= 1 ? 1 : THREE.MathUtils.clamp(stepIndex / (steps.length - 1), 0, 1);
+      const orbital = ORBITAL_MODELS[orbitalId] || ORBITAL_MODELS.sp3;
+      const bond = BOND_MODELS[bondId] || BOND_MODELS.sigma;
+      const molecule = MOLECULES[moleculeId] || MOLECULES.CH4;
+
+      buildOrbitalView(app.panes.orbitalPane, orbital.id);
+      buildMoleculeView(app.panes.moleculePane, molecule.id, { bondId: bond.id, progress, stepIndex });
+
+      setCaption("orbitalCaption", orbital.name);
+      setCaption("moleculeCaption", molecule.name);
+
+      const status = document.getElementById("status");
+      if (status) {
+        status.textContent = `${theme.label || theme.name}｜${steps[stepIndex]}：${orbital.label} 轨道，${bond.label} 成键，${molecule.label} 分子`;
+      }
+    }
+
+    function getLibraryGroupType(group) {
+      const rawType = String(group?.type || group?.modelType || group?.id || "").toLowerCase();
+      const typeMap = {
+        orbital: "orbital",
+        orbitals: "orbital",
+        bond: "bond",
+        bonds: "bond",
+        molecule: "molecule",
+        molecules: "molecule"
+      };
+
+      return typeMap[rawType] || "";
+    }
+
+    function getLibraryCategoryLabel(type, fallback = "") {
+      const labels = {
+        orbital: "轨道模型",
+        bond: "键型模型",
+        molecule: "分子模型"
+      };
+
+      return labels[type] || fallback || "模型";
+    }
+
+    function getExplorerModel(type, id) {
+      const libraries = {
+        orbital: ORBITAL_MODELS,
+        bond: BOND_MODELS,
+        molecule: MOLECULES
+      };
+
+      return libraries[type]?.[id] || null;
+    }
+
+    function getFallbackExplorerSelection() {
+      if (MOLECULES.CH4) {
+        return { type: "molecule", id: "CH4" };
+      }
+
+      const groups = getLibraryGroups();
+      for (const group of groups) {
+        const type = getLibraryGroupType(group);
+        if (!type || !Array.isArray(group.items)) {
+          continue;
+        }
+
+        const model = group.items.find((item) => item?.id && getExplorerModel(type, item.id));
+        if (model) {
+          return { type, id: model.id };
+        }
+      }
+
+      return { type: "molecule", id: "" };
+    }
+
+    function normalizeExplorerSelection(selection = app.explorerSelection) {
+      const type = selection?.type;
+      const id = selection?.id;
+
+      if (getExplorerModel(type, id)) {
+        return { type, id };
+      }
+
+      const fallback = getFallbackExplorerSelection();
+      app.explorerSelection = fallback;
+      return fallback;
+    }
+
+    function renderLibrary() {
+      const library = document.getElementById("library");
+      if (!library) {
+        return;
+      }
+
+      const selection = normalizeExplorerSelection();
+      const fragment = document.createDocumentFragment();
+
+      getLibraryGroups().forEach((group) => {
+        const type = getLibraryGroupType(group);
+        const items = Array.isArray(group.items) ? group.items : [];
+
+        if (!type || !items.length) {
+          return;
+        }
+
+        const section = document.createElement("section");
+        const heading = document.createElement("h3");
+        heading.textContent = getLibraryCategoryLabel(type, group.label);
+        section.appendChild(heading);
+
+        items.forEach((item) => {
+          if (!item?.id || !getExplorerModel(type, item.id)) {
+            return;
+          }
+
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.type = type;
+          button.dataset.id = item.id;
+          button.textContent = item.name || item.label || item.id;
+          button.classList.toggle("active", selection.type === type && selection.id === item.id);
+          button.setAttribute("aria-pressed", String(selection.type === type && selection.id === item.id));
+          button.addEventListener("click", () => {
+            app.explorerSelection = { type, id: item.id };
+            renderLibrary();
+            renderExplorerSelection();
+          });
+          section.appendChild(button);
+        });
+
+        fragment.appendChild(section);
+      });
+
+      library.replaceChildren(fragment);
+    }
+
+    function renderExplorerSelection() {
+      const pane = app.panes.explorerPane || app.panes.explorer;
+      const title = document.getElementById("explorerTitle");
+      const caption = document.getElementById("explorerCaption");
+
+      if (!pane) {
+        return;
+      }
+
+      const selection = normalizeExplorerSelection();
+      const model = getExplorerModel(selection.type, selection.id);
+
+      clearPane(pane);
+
+      if (!model) {
+        if (title) {
+          title.textContent = "模型观察";
+        }
+        if (caption) {
+          caption.textContent = "";
+        }
+        resizePane(pane);
+        return;
+      }
+
+      if (selection.type === "orbital") {
+        buildOrbitalView(pane, model.id);
+        if (title) {
+          title.textContent = "轨道模型";
+        }
+        if (caption) {
+          caption.textContent = `${model.name || model.label || model.id} · ${model.label || model.id}`;
+        }
+      } else if (selection.type === "bond") {
+        buildBondView(pane, model.id, 1);
+        if (title) {
+          title.textContent = "键型模型";
+        }
+        if (caption) {
+          caption.textContent = `${model.name || model.label || model.id} · ${model.description || model.kind || model.id}`;
+        }
+      } else {
+        buildMoleculeView(pane, model.id);
+        if (title) {
+          title.textContent = "分子模型";
+        }
+        if (caption) {
+          caption.textContent = `${model.name || model.label || model.id} · ${model.hybrid || "未知"} 杂化`;
+        }
+      }
+
+      resizePane(pane);
+      requestAnimationFrame(() => resizePane(pane));
+    }
+
+    function getThemeStepCount(theme = getTheme(app.topicId)) {
+      return Math.max(1, Array.isArray(theme?.steps) && theme.steps.length ? theme.steps.length : 4);
+    }
+
+    function clampStep(theme = getTheme(app.topicId)) {
+      const stepCount = getThemeStepCount(theme);
+      app.stepIndex = THREE.MathUtils.clamp(Math.trunc(Number(app.stepIndex) || 0), 0, stepCount - 1);
+      return app.stepIndex;
+    }
+
+    function renderCurrentMode() {
+      renderTriptych();
+
+      if (app.mode === "explorer" && typeof renderExplorerSelection === "function") {
+        renderExplorerSelection();
+      }
+    }
+
+    function populateTopicSelect() {
+      const select = document.getElementById("topicSelect");
+      if (!select) {
+        return;
+      }
+
+      const currentTopic = getTheme(app.topicId)?.id || THEMES[0]?.id || "";
+      select.replaceChildren(...THEMES.map((theme) => {
+        const option = document.createElement("option");
+        option.value = theme.id;
+        option.textContent = theme.label || theme.name || theme.id;
+        return option;
+      }));
+      select.value = currentTopic;
+      app.topicId = currentTopic;
+    }
+
+    function setMode(mode) {
+      const nextMode = mode === "explorer" ? "explorer" : "triptych";
+      const triptych = document.getElementById("triptych");
+      const explorer = document.getElementById("explorer");
+      const triptychButton = document.getElementById("triptychMode");
+      const explorerButton = document.getElementById("explorerMode");
+
+      app.mode = nextMode;
+      triptych?.classList.toggle("hidden", nextMode !== "triptych");
+      explorer?.classList.toggle("active", nextMode === "explorer");
+      triptychButton?.setAttribute("aria-pressed", String(nextMode === "triptych"));
+      explorerButton?.setAttribute("aria-pressed", String(nextMode === "explorer"));
+      triptychButton?.classList.toggle("primary", nextMode === "triptych");
+      explorerButton?.classList.toggle("primary", nextMode === "explorer");
+
+      resizeAllPanes();
+      requestAnimationFrame(resizeAllPanes);
+      if (nextMode === "triptych") {
+        renderTriptych();
+      } else if (typeof renderExplorerSelection === "function") {
+        renderExplorerSelection();
+      }
+    }
+
+    function setTopic(topicId) {
+      const theme = getTheme(topicId);
+      app.topicId = theme.id;
+      app.stepIndex = 0;
+
+      const select = document.getElementById("topicSelect");
+      if (select) {
+        select.value = app.topicId;
+      }
+
+      renderCurrentMode();
+    }
+
+    function nextStep() {
+      const theme = getTheme(app.topicId);
+      const stepCount = getThemeStepCount(theme);
+      app.stepIndex = (clampStep(theme) + 1) % stepCount;
+      renderCurrentMode();
+    }
+
+    function prevStep() {
+      const theme = getTheme(app.topicId);
+      const stepCount = getThemeStepCount(theme);
+      app.stepIndex = (clampStep(theme) - 1 + stepCount) % stepCount;
+      renderCurrentMode();
+    }
+
+    function resetPaneView(pane) {
+      if (!pane) {
+        return;
+      }
+
+      pane.root.rotation.set(0, 0, 0);
+      pane.camera.position.set(0, 0.25, 6);
+      pane.camera.lookAt(0, 0, 0);
+      pane.camera.updateProjectionMatrix();
+    }
+
+    function resetView() {
+      app.stepIndex = 0;
+      Object.values(app.panes).forEach(resetPaneView);
+      renderCurrentMode();
+    }
+
+    function setPlaying(isPlaying) {
+      const playButton = document.getElementById("playBtn");
+      const pauseButton = document.getElementById("pauseBtn");
+
+      app.isPlaying = Boolean(isPlaying);
+      playButton?.setAttribute("aria-pressed", String(app.isPlaying));
+      pauseButton?.setAttribute("aria-pressed", String(!app.isPlaying));
+      playButton?.classList.toggle("primary", app.isPlaying);
+      pauseButton?.classList.toggle("primary", !app.isPlaying);
+    }
+
+    function setAutoRotate(isEnabled) {
+      const autoRotateButton = document.getElementById("autoRotateBtn");
+
+      app.settings.autoRotate = Boolean(isEnabled);
+      autoRotateButton?.setAttribute("aria-pressed", String(app.settings.autoRotate));
+      autoRotateButton?.classList.toggle("primary", app.settings.autoRotate);
+      if (autoRotateButton) {
+        autoRotateButton.textContent = app.settings.autoRotate ? "停止旋转" : "自动旋转";
+      }
+    }
+
+    function setupControls() {
+      if (app.controlsInitialized) {
+        populateTopicSelect();
+        setPlaying(app.isPlaying);
+        setAutoRotate(app.settings.autoRotate);
+        return;
+      }
+
+      populateTopicSelect();
+      setPlaying(app.isPlaying);
+      setAutoRotate(app.settings.autoRotate);
+
+      document.getElementById("triptychMode")?.addEventListener("click", () => setMode("triptych"));
+      document.getElementById("explorerMode")?.addEventListener("click", () => setMode("explorer"));
+      document.getElementById("topicSelect")?.addEventListener("change", (event) => setTopic(event.target.value));
+      document.getElementById("playBtn")?.addEventListener("click", () => setPlaying(true));
+      document.getElementById("pauseBtn")?.addEventListener("click", () => setPlaying(false));
+      document.getElementById("autoRotateBtn")?.addEventListener("click", () => setAutoRotate(!app.settings.autoRotate));
+      document.getElementById("nextBtn")?.addEventListener("click", nextStep);
+      document.getElementById("prevBtn")?.addEventListener("click", prevStep);
+      document.getElementById("resetBtn")?.addEventListener("click", resetView);
+
+      const advancedButton = document.getElementById("advancedBtn");
+      const advancedPanel = document.getElementById("advancedPanel");
+      advancedButton?.addEventListener("click", () => {
+        const isOpen = !advancedPanel?.classList.contains("open");
+        advancedPanel?.classList.toggle("open", isOpen);
+        advancedButton.setAttribute("aria-expanded", String(isOpen));
+        resizeAllPanes();
+      });
+
+      [
+        ["labelsToggle", "labels"],
+        ["anglesToggle", "angles"],
+        ["orbitalsToggle", "orbitals"],
+        ["ballStickToggle", "ballStick"],
+        ["overlapToggle", "overlap"],
+        ["syncRotateToggle", "syncRotate"]
+      ].forEach(([id, setting]) => {
+        document.getElementById(id)?.addEventListener("change", (event) => {
+          app.settings[setting] = event.target.checked;
+          renderCurrentMode();
+        });
+      });
+
+      document.getElementById("opacityRange")?.addEventListener("input", (event) => {
+        app.settings.opacity = THREE.MathUtils.clamp(Number(event.target.value) || app.settings.opacity, 0.15, 0.9);
+        renderCurrentMode();
+      });
+
+      document.getElementById("speedRange")?.addEventListener("input", (event) => {
+        app.speed = THREE.MathUtils.clamp(Number(event.target.value) || 1, 0.5, 2);
+      });
+
+      app.controlsInitialized = true;
+    }
+
+    function tickPlayback(timestamp) {
+      if (!app.lastPlaybackAt) {
+        app.lastPlaybackAt = timestamp;
+      }
+
+      const playbackDelay = 2600 / Math.max(0.5, app.speed);
+      if (app.isPlaying && timestamp - app.lastPlaybackAt >= playbackDelay) {
+        nextStep();
+        app.lastPlaybackAt = timestamp;
+      }
+
+      app.playbackFrameId = requestAnimationFrame(tickPlayback);
+    }
+
+    function startPlaybackLoop() {
+      if (app.playbackLoopStarted) {
+        return;
+      }
+
+      app.playbackLoopStarted = true;
+      app.playbackFrameId = requestAnimationFrame(tickPlayback);
+    }
+
+    function setupPanes() {
+      const paneIds = ["orbitalPane", "moleculePane", "explorerPane"];
+      const existingPanes = paneIds.map((id) => app.panes[id]);
+      const panesReady = existingPanes.every((pane, index) => (
+        pane
+        && pane.host === document.getElementById(paneIds[index])
+        && pane.renderer?.domElement?.isConnected
+      ));
+
+      if (panesReady) {
+        resizeAllPanes();
+        return app.panes;
+      }
+
+      Object.values(app.panes).forEach(disposePane);
+      app.panes = {
+        orbitalPane: createPane("orbitalPane", "orbitalPane"),
+        moleculePane: createPane("moleculePane", "moleculePane"),
+        explorerPane: createPane("explorerPane", "explorerPane")
+      };
+      return app.panes;
+    }
+
+    function renderLoop() {
+      if (app.renderLoopStarted) {
+        return;
+      }
+
+      app.renderLoopStarted = true;
+
+      const tick = () => {
+        const panes = Object.values(app.panes).filter(Boolean);
+        const rotationStep = 0.0035 * app.speed;
+
+        panes.forEach((pane) => {
+          const shouldAutoRotate = app.settings.autoRotate && (
+            app.mode === "explorer"
+              ? pane.name === "explorerPane"
+              : app.settings.syncRotate
+          );
+          if (shouldAutoRotate) {
+            pane.root.rotation.y += rotationStep;
+          }
+
+          clampRootRotationX(pane);
+          renderPane(pane);
+        });
+
+        app.animationFrameId = requestAnimationFrame(tick);
+      };
+
+      app.animationFrameId = requestAnimationFrame(tick);
+    }
+
+    window.addEventListener("resize", resizeAllPanes);
+
+    setupPanes();
+    setupControls();
+    renderLibrary();
+    renderTriptych();
+    renderExplorerSelection();
+    renderLoop();
+    startPlaybackLoop();
+
+    window.__hybridOrbitalApp = app;
+    Object.assign(window.__hybridOrbitalApp, {
+      ELEMENTS,
+      THEMES,
+      ORBITAL_MODELS,
+      BOND_MODELS,
+      MOLECULES,
+      getTheme,
+      getLibraryGroups,
+      getLibraryGroupType,
+      getLibraryCategoryLabel,
+      getExplorerModel,
+      getFallbackExplorerSelection,
+      normalizeExplorerSelection,
+      runSelfTests,
+      normalizeVector,
+      makeMaterial,
+      makeOrbitalLobe,
+      makeSOrbital,
+      makePOrbital,
+      makeHybridOrbital,
+      makeAtom,
+      makeCylinderBetween,
+      makeBondStick,
+      makeTextSprite,
+      createPane,
+      attachPointerControls,
+      clampRootRotationX,
+      resizePane,
+      resizeAllPanes,
+      clearPane,
+      renderPane,
+      addLabel,
+      addAngleLabels,
+      buildOrbitalView,
+      getOrbitalColor,
+      buildMoleculeView,
+      buildBondView,
+      renderLibrary,
+      renderExplorerSelection,
+      renderTriptych,
+      populateTopicSelect,
+      setMode,
+      clampStep,
+      setTopic,
+      nextStep,
+      prevStep,
+      resetView,
+      setPlaying,
+      setAutoRotate,
+      setupControls,
+      tickPlayback,
+      startPlaybackLoop,
+      setupPanes,
+      renderLoop
+    });
+  </script>
+  <script src="./deepseek-assistant.js"></script>
+</body>
+</html>
